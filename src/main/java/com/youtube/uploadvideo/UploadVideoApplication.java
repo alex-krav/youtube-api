@@ -17,12 +17,12 @@ public class UploadVideoApplication {
 		SpringApplication.run(UploadVideoApplication.class, args);
 	}
 
-	@Bean
+	/*@Bean
 	CommandLineRunner init(StorageService storageService) {
 		return (args) -> {
 			storageService.deleteAll();
 			storageService.init();
 		};
-	}
+	}*/
 }
 

@@ -41,6 +41,9 @@ public class FileSystemStorageService implements StorageService {
                 throw new StorageException(
                         "Cannot store file outside current directory.");
             }
+            if (!Files.exists(this.rootLocation)) {
+                Files.createDirectories(this.rootLocation);
+            }
             try (InputStream inputStream = file.getInputStream()) {
                 Files.copy(inputStream, destinationFile,
                         StandardCopyOption.REPLACE_EXISTING);
