@@ -1,35 +1,45 @@
 package com.youtube.uploadvideo;
 
-import com.youtube.uploadvideo.model.*;
+import com.youtube.uploadvideo.exception.NotAuthorizedException;
+import com.youtube.uploadvideo.exception.VideoNotFoundException;
+import com.youtube.uploadvideo.model.StatusDTO;
+import com.youtube.uploadvideo.model.UploadStatus;
+import com.youtube.uploadvideo.model.User;
+import com.youtube.uploadvideo.model.Video;
 import com.youtube.uploadvideo.repository.UserRepository;
 import com.youtube.uploadvideo.repository.VideoRepository;
 import com.youtube.uploadvideo.storage.StorageService;
+import com.youtube.uploadvideo.storage.VideoStreamService;
 import com.youtube.uploadvideo.utils.RandomString;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaTypeFactory;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.codec.multipart.FilePart;
+import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
-
-import javax.servlet.http.HttpServletResponse;
-import java.util.concurrent.ThreadLocalRandom;
+import reactor.core.publisher.Mono;
 
 @RestController
+@RequestMapping("/api/v1")
 public class RestApiController {
 
     @Autowired
     private StorageService storageService;
     @Autowired
+    private VideoStreamService videoStreamService;
+    @Autowired
     private UserRepository userRepository;
     @Autowired
     private VideoRepository videoRepository;
 
-    @PostMapping("/api/v1/video")
-    public Object upload(@RequestHeader("Authorization") String token,
-                           @RequestParam("file") MultipartFile file,
-                           HttpServletResponse response) {
+    @PostMapping("/video")
+    public ResponseEntity<StatusDTO> upload(@RequestHeader("Authorization") String token,
+                                            @RequestPart("file") FilePart file) {
         User user = userRepository.findByToken(token);
         if (user == null) {
-            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-            return new ErrorResponse(401, "Not Authorized");
+            throw new NotAuthorizedException("User not authorized");
         }
 
         storageService.store(file);
@@ -37,32 +47,29 @@ public class RestApiController {
         Video video = new Video();
         video.setUser(user);
         video.setVideoId(RandomString.generator().generate(10));
-        video.setFileName(file.getOriginalFilename());
+        video.setFileName(file.filename());
         video.setUploadStatus(UploadStatus.IN_PROGRESS.value());
         videoRepository.save(video);
 
-        return new UploadResponse(200, UploadStatus.IN_PROGRESS.value(), video.getVideoId());
+        return ResponseEntity.status(HttpStatus.OK)
+                .body(new StatusDTO(video.getUploadStatus(), video.getVideoId()));
     }
 
-    @GetMapping("/api/v1/video/{videoId}/status")
-    public Object status(@RequestHeader("Authorization") String token,
-                           @PathVariable("videoId") String videoId,
-                           HttpServletResponse response) {
+    @GetMapping("/video/{videoId}/status")
+    public ResponseEntity<StatusDTO> status(@RequestHeader("Authorization") String token,
+                                            @PathVariable("videoId") String videoId) {
         User user = userRepository.findByToken(token);
         if (user == null) {
-            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-            return new ErrorResponse(401, "Not Authorized");
+            throw new NotAuthorizedException("User not authorized");
         }
 
         Video video = videoRepository.findByVideoId(videoId);
         if (video == null) {
-            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
-            return new ErrorResponse(404, "Not Found");
+            throw new VideoNotFoundException("Video not found");
         }
 
         if (!video.getUser().equals(user)) {
-            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-            return new ErrorResponse(401, "Not Authorized");
+            throw new NotAuthorizedException("User not authorized");
         }
 
         if (UploadStatus.getByValue(video.getUploadStatus()).equals(UploadStatus.IN_PROGRESS)) {
@@ -70,6 +77,23 @@ public class RestApiController {
             videoRepository.save(video);
         }
 
-        return new UploadResponse(200, video.getUploadStatus(), video.getVideoId());
+        return ResponseEntity.status(HttpStatus.OK)
+                .body(new StatusDTO(video.getUploadStatus(), video.getVideoId()));
+    }
+
+    @GetMapping("/video/{videoId}/stream")
+    public Mono<ResponseEntity<byte[]>> streamVideo(ServerHttpResponse serverHttpResponse,
+                                                    @RequestHeader(value = "Range", required = false) String httpRangeList,
+                                                    @PathVariable("videoId") String videoId) {
+        Video video = videoRepository.findByVideoId(videoId);
+        if (video == null) {
+            throw new VideoNotFoundException("Video not found");
+        }
+
+        Resource resource = storageService.loadAsResource(video.getFileName());
+        String resolvedFileName = storageService.resolvedFilename(video.getFileName());
+        String mediaType = MediaTypeFactory.getMediaType(resource).get().toString();
+
+        return Mono.just(videoStreamService.prepareContent(resolvedFileName, mediaType, httpRangeList));
     }
 }
