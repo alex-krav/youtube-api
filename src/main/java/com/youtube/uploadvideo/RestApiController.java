@@ -23,7 +23,7 @@ public class RestApiController {
     private VideoRepository videoRepository;
 
     @PostMapping("/api/v1/video")
-    public Object greeting(@RequestHeader("Authorization") String token,
+    public Object upload(@RequestHeader("Authorization") String token,
                            @RequestParam("file") MultipartFile file,
                            HttpServletResponse response) {
         User user = userRepository.findByToken(token);
@@ -42,5 +42,34 @@ public class RestApiController {
         videoRepository.save(video);
 
         return new UploadResponse(200, UploadStatus.IN_PROGRESS.value(), video.getVideoId());
+    }
+
+    @GetMapping("/api/v1/video/{videoId}/status")
+    public Object status(@RequestHeader("Authorization") String token,
+                           @PathVariable("videoId") String videoId,
+                           HttpServletResponse response) {
+        User user = userRepository.findByToken(token);
+        if (user == null) {
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            return new ErrorResponse(401, "Not Authorized");
+        }
+
+        Video video = videoRepository.findByVideoId(videoId);
+        if (video == null) {
+            response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+            return new ErrorResponse(404, "Not Found");
+        }
+
+        if (!video.getUser().equals(user)) {
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            return new ErrorResponse(401, "Not Authorized");
+        }
+
+        if (UploadStatus.getByValue(video.getUploadStatus()).equals(UploadStatus.IN_PROGRESS)) {
+            video.setUploadStatus(UploadStatus.COMPLETE.value());
+            videoRepository.save(video);
+        }
+
+        return new UploadResponse(200, video.getUploadStatus(), video.getVideoId());
     }
 }

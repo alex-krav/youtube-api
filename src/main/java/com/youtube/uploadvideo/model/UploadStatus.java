@@ -15,7 +15,7 @@ public enum UploadStatus {
         return value;
     }
 
-    public UploadStatus getByValue(String value) {
+    public static UploadStatus getByValue(String value) {
         for (UploadStatus v : values()) {
             if (v.value().equals(value)) {
                 return v;
