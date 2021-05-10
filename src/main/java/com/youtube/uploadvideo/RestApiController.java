@@ -8,6 +8,7 @@ import com.youtube.uploadvideo.model.User;
 import com.youtube.uploadvideo.model.Video;
 import com.youtube.uploadvideo.repository.UserRepository;
 import com.youtube.uploadvideo.repository.VideoRepository;
+import com.youtube.uploadvideo.storage.StorageFileNotFoundException;
 import com.youtube.uploadvideo.storage.StorageService;
 import com.youtube.uploadvideo.storage.VideoStreamService;
 import com.youtube.uploadvideo.utils.RandomString;
@@ -34,9 +35,9 @@ public class RestApiController {
     @Autowired
     private VideoRepository videoRepository;
 
-    @PostMapping("/video")
+    @PostMapping("/videos")
     public ResponseEntity<StatusDTO> upload(@RequestHeader("Authorization") String token,
-                                            @RequestPart("file") FilePart file) {
+                                            @RequestPart("video_file") FilePart file) {
         User user = userRepository.findByToken(token);
         if (user == null) {
             throw new NotAuthorizedException("User not authorized");
@@ -51,13 +52,13 @@ public class RestApiController {
         video.setUploadStatus(UploadStatus.IN_PROGRESS.value());
         videoRepository.save(video);
 
-        return ResponseEntity.status(HttpStatus.OK)
+        return ResponseEntity.status(HttpStatus.ACCEPTED)
                 .body(new StatusDTO(video.getUploadStatus(), video.getVideoId()));
     }
 
-    @GetMapping("/video/{videoId}/status")
+    @GetMapping("/videos/{video-id}/status")
     public ResponseEntity<StatusDTO> status(@RequestHeader("Authorization") String token,
-                                            @PathVariable("videoId") String videoId) {
+                                            @PathVariable("video-id") String videoId) {
         User user = userRepository.findByToken(token);
         if (user == null) {
             throw new NotAuthorizedException("User not authorized");
@@ -72,22 +73,36 @@ public class RestApiController {
             throw new NotAuthorizedException("User not authorized");
         }
 
-        if (UploadStatus.getByValue(video.getUploadStatus()).equals(UploadStatus.IN_PROGRESS)) {
+        String uploadStatus = video.getUploadStatus();
+        if (UploadStatus.getByValue(uploadStatus).equals(UploadStatus.IN_PROGRESS)) {
             video.setUploadStatus(UploadStatus.COMPLETE.value());
             videoRepository.save(video);
+            return ResponseEntity.status(HttpStatus.ACCEPTED)
+                    .body(new StatusDTO(uploadStatus, video.getVideoId()));
         }
 
         return ResponseEntity.status(HttpStatus.OK)
-                .body(new StatusDTO(video.getUploadStatus(), video.getVideoId()));
+                .body(new StatusDTO(uploadStatus, video.getVideoId()));
     }
 
-    @GetMapping("/video/{videoId}/stream")
+    @GetMapping("/videos/{video-id}")
     public Mono<ResponseEntity<byte[]>> streamVideo(ServerHttpResponse serverHttpResponse,
                                                     @RequestHeader(value = "Range", required = false) String httpRangeList,
-                                                    @PathVariable("videoId") String videoId) {
+                                                    @PathVariable("video-id") String videoId,
+                                                    @RequestParam(value = "height", required = false) String height,
+                                                    @RequestParam(value = "time", required = false) String time,
+                                                    @RequestParam(value = "speed", required = false) String speed,
+                                                    @RequestParam(value = "subtitles", required = false) String subtitles) {
         Video video = videoRepository.findByVideoId(videoId);
         if (video == null) {
             throw new VideoNotFoundException("Video not found");
+        }
+
+        String uploadStatus = video.getUploadStatus();
+        if (UploadStatus.getByValue(uploadStatus).equals(UploadStatus.IN_PROGRESS)) {
+            video.setUploadStatus(UploadStatus.COMPLETE.value());
+            videoRepository.save(video);
+            throw new StorageFileNotFoundException("File not available");
         }
 
         Resource resource = storageService.loadAsResource(video.getFileName());
