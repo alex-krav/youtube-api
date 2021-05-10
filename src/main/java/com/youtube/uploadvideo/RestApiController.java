@@ -12,6 +12,8 @@ import com.youtube.uploadvideo.storage.StorageFileNotFoundException;
 import com.youtube.uploadvideo.storage.StorageService;
 import com.youtube.uploadvideo.storage.VideoStreamService;
 import com.youtube.uploadvideo.utils.RandomString;
+import net.jodah.failsafe.Failsafe;
+import net.jodah.failsafe.RetryPolicy;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpStatus;
@@ -21,6 +23,8 @@ import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
+
+import java.time.Duration;
 
 @RestController
 @RequestMapping("/api/v1")
@@ -105,7 +109,12 @@ public class RestApiController {
             throw new StorageFileNotFoundException("File not available");
         }
 
-        Resource resource = storageService.loadAsResource(video.getFileName());
+        RetryPolicy<Resource> retryPolicy = new RetryPolicy<>();
+        retryPolicy.withMaxRetries(3);
+        retryPolicy.withDelay(Duration.ofSeconds(5));
+        retryPolicy.handle(StorageFileNotFoundException.class);
+        Resource resource = Failsafe.with(retryPolicy).get(() -> storageService.loadAsResource(video.getFileName()));
+
         String resolvedFileName = storageService.resolvedFilename(video.getFileName());
         String mediaType = MediaTypeFactory.getMediaType(resource).get().toString();
 
